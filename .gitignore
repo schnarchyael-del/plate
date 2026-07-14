@@ -13,3 +13,4 @@
 # local secrets (API keys, etc.) — never commit these
 *.local.json
 .env
+dist/
