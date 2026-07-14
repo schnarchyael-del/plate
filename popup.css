@@ -182,10 +182,12 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.why.empty {
+/* NOT ".why.empty" — the .empty empty-STATE class (44px centered padding)
+   would win by source order and blow the note line up into a giant box. */
+.why.unseasoned {
   color: var(--ink-faint);
   font-style: italic;
-  border-left: 2px dotted var(--green); /* "unseasoned" cue */
+  border-left: 2px dotted var(--green);
 }
 .why-edit {
   width: 100%;

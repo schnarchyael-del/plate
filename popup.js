@@ -603,7 +603,7 @@ function whyBlock(c) {
   }
   const why = document.createElement('div');
   const has = (c.why || '').length > 0;
-  why.className = 'why' + (has ? '' : ' empty'); // .empty = unseasoned (dotted olive border)
+  why.className = 'why' + (has ? '' : ' unseasoned'); // dotted olive border cue
   if (has) setHighlighted(why, c.why);
   else why.textContent = 'Add a note — why you saved it';
   why.title = 'Click to edit';
