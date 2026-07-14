@@ -3,6 +3,7 @@
 
 (function () {
   const INBOX_RENDER_CAP = 200;
+  const INBOX_INPUT_MAX = 500_000; // chars; ~larger than any real self-text blob
   const STALE_DAYS = 14;
   const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -13,7 +14,8 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // NBSP and zero-width characters count as whitespace for trimming/blank checks.
@@ -61,7 +63,9 @@
   // becomes the line's source; a quote line followed by a URL-only line
   // pairs into one clip.
   function parseInbox(text) {
-    const lines = String(text).replace(/\r/g, '').split('\n');
+    // Hostile/accidental multi-MB pastes: hard-cap input before any regex work.
+    const capped = String(text).slice(0, INBOX_INPUT_MAX);
+    const lines = capped.replace(/\r/g, '').split('\n');
     const all = [];
     for (const raw of lines) {
       const line = cleanLine(raw);
@@ -73,7 +77,8 @@
         else all.push({ kind: 'link', text: line, url });
         continue;
       }
-      const tm = line.match(/^(.*\S)\s+(https?:\/\/\S+)$/);
+      // Trailing-URL extraction skipped on pathological line lengths (regex backtracking).
+      const tm = line.length <= 2000 && line.match(/^(.*\S)\s+(https?:\/\/\S+)$/);
       if (tm) {
         const tUrl = normalizeUrl(tm[2]);
         if (tUrl) { all.push({ kind: 'text', text: tm[1], url: tUrl }); continue; }
@@ -107,21 +112,31 @@
     }
   }
 
+  // Prebuilt lookup for dedupe — build once per inbox session, not per keystroke.
+  function buildDedupeIndex(existingClips) {
+    const texts = new Set();
+    const urls = new Set();
+    for (const c of existingClips) {
+      if (typeof c.text === 'string') texts.add(c.text.trim());
+      if (c.url) {
+        const n = normalizeUrl(c.url);
+        if (n) urls.add(n);
+      }
+    }
+    return { texts, urls };
+  }
+
   // Annotate candidates against existing clips and within-paste duplicates.
   // status: 'ok' | 'already-saved' | 'dup-in-paste'. "already saved" wins.
   // Match rules (exact, case-sensitive): trimmed candidate text equals clip
   // text, or (link candidates only) normalized URLs equal. URL inside a text
-  // line does NOT match.
-  function dedupeCandidates(candidates, existingClips) {
-    const existingTexts = new Set();
-    const existingUrls = new Set();
-    for (const c of existingClips) {
-      if (typeof c.text === 'string') existingTexts.add(c.text.trim());
-      if (c.url) {
-        const n = normalizeUrl(c.url);
-        if (n) existingUrls.add(n);
-      }
-    }
+  // line does NOT match. Second arg: clips array OR a buildDedupeIndex result.
+  function dedupeCandidates(candidates, existingClipsOrIndex) {
+    const index = existingClipsOrIndex && existingClipsOrIndex.texts instanceof Set
+      ? existingClipsOrIndex
+      : buildDedupeIndex(existingClipsOrIndex || []);
+    const existingTexts = index.texts;
+    const existingUrls = index.urls;
     const seenTexts = new Set();
     const seenUrls = new Set();
     return candidates.map((cand) => {
@@ -191,19 +206,25 @@
     return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
   }
 
-  // Archive-toggle transition. Stamps archivedAt and reports whether this
-  // counts as a Done (false -> true only). Unarchive clears archivedAt and
-  // any snooze; it never counts as a Done.
-  function applyToggleArchive(clip, now) {
-    if (!clip.archived) {
-      return {
-        clip: { ...clip, archived: true, archivedAt: now, snoozedUntil: undefined, updatedAt: now },
-        didArchive: true
-      };
-    }
+  // Explicit, idempotent transitions — NEVER toggles. A double-fired Done
+  // (double keypress in the reward beat, second popup window, double-click)
+  // must no-op, not silently un-archive (adversarial finding H1).
+  // applyArchive: no-op if already archived; didArchive=true only on the
+  // actual false->true transition (the only event that counts as a Done).
+  function applyArchive(clip, now) {
+    if (clip.archived) return { clip, didArchive: false };
+    return {
+      clip: { ...clip, archived: true, archivedAt: now, snoozedUntil: undefined, updatedAt: now },
+      didArchive: true
+    };
+  }
+
+  // applyUnarchive: no-op if not archived; clears archivedAt. Never a Done.
+  function applyUnarchive(clip, now) {
+    if (!clip.archived) return { clip, didUnarchive: false };
     return {
       clip: { ...clip, archived: false, archivedAt: undefined, updatedAt: now },
-      didArchive: false
+      didUnarchive: true
     };
   }
 
@@ -313,10 +334,10 @@
   }
 
   const api = {
-    INBOX_RENDER_CAP, STALE_DAYS,
-    escapeHtml, cleanLine, parseInbox, normalizeUrl, dedupeCandidates,
+    INBOX_RENDER_CAP, INBOX_INPUT_MAX, STALE_DAYS,
+    escapeHtml, cleanLine, parseInbox, normalizeUrl, buildDedupeIndex, dedupeCandidates,
     makeClip, isSnoozed, pickServeClip, plateCounts, startOfNextLocalDay,
-    applyToggleArchive, applySnooze, isPlateStale,
+    applyArchive, applyUnarchive, applySnooze, isPlateStale,
     isoWeekKey, defaultStats, normalizeStats, recordDone, recordUndoDone,
     noteFillRate, relTime, ageLabel, safeHref
   };

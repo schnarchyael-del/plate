@@ -21,6 +21,9 @@ const segments   = Array.from(document.querySelectorAll('.segment'));
 const LIST_RENDER_CAP = 200;
 const UNDO_MS = 3000;
 const REWARD_MS = 700;
+const SEARCH_DEBOUNCE_MS = 150;
+const PARSE_DEBOUNCE_MS = 120;
+const NOTE_IDLE_COMMIT_MS = 600;
 
 let clips = [];
 let view = 'serve';        // 'serve' | 'list' | 'inbox'
@@ -28,10 +31,13 @@ let listView = 'plate';    // 'plate' | 'archive' | 'all'
 let query = '';
 let editingId = null;      // which clip's why-line is open for editing
 let servedId = null;       // clip currently on the serve card
-let undoState = null;      // { label, undo:fn, timer }
-let inboxCandidates = [];  // annotated candidates in the inbox view
+let undoState = null;      // { label, undoFn, timer }
+let inboxState = { candidates: [], total: 0, capped: false }; // no array expandos
+let dedupeIndex = null;    // memoized per inbox session, rebuilt on clips echo
+let cachedStats = null;    // invalidated on every stats mutation
 let searchTimer = null;
 let parseTimer = null;
+let noteTimer = null;
 let suppressRender = false; // true during the serve reward beat so the
                             // storage echo can't stomp the choreography
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -39,10 +45,31 @@ const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matc
 init();
 
 async function init() {
-  clips = await store.readClips();
+  // Listener FIRST: a context-menu save landing between read and subscribe
+  // must not be invisible until the next change (adversarial L4).
+  // Always adopt the event value; only open drafts (note editor, inbox
+  // textarea) survive a re-render.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes[PlateStore.CLIPS_KEY]) return;
+    const v = changes[PlateStore.CLIPS_KEY].newValue;
+    clips = Array.isArray(v) ? v : [];
+    dedupeIndex = null;
+    if (suppressRender) return; // beat in progress; its timeout renders
+    const drafts = captureDrafts();
+    render();
+    restoreDrafts(drafts);
+  });
+
+  try {
+    clips = await store.readClips();
+  } catch (e) {
+    clips = [];
+    saveFailed(e);
+  }
 
   // Popup-open is the resurfacing exposure denominator (plan F2/F5).
   store.mutateStats((s) => { s.popupOpens += 1; return s; }).catch(() => {});
+  cachedStats = null;
 
   view = L.plateCounts(clips, Date.now()).servable > 0 ? 'serve' : 'list';
   render();
@@ -52,7 +79,7 @@ async function init() {
     searchTimer = setTimeout(() => {
       query = searchEl.value.trim();
       render();
-    }, 150);
+    }, SEARCH_DEBOUNCE_MS);
   });
 
   segments.forEach((btn) => {
@@ -63,33 +90,27 @@ async function init() {
     });
   });
 
-  inboxBtn.addEventListener('click', () => { view = 'inbox'; inboxCandidates = []; render(); });
+  inboxBtn.addEventListener('click', () => {
+    view = 'inbox';
+    inboxState = { candidates: [], total: 0, capped: false };
+    dedupeIndex = null;
+    render();
+  });
   backBtn.addEventListener('click', () => { view = 'list'; render(); });
 
   document.addEventListener('keydown', onKeydown);
-
-  // Reflect changes made elsewhere (e.g. a context-menu save while open).
-  // Always adopt the event value; only an open note editor's draft survives.
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes[PlateStore.CLIPS_KEY]) return;
-    const v = changes[PlateStore.CLIPS_KEY].newValue;
-    clips = Array.isArray(v) ? v : [];
-    if (suppressRender) return; // beat in progress; its timeout renders
-    const draft = captureEditorDraft();
-    render();
-    restoreEditorDraft(draft);
-  });
 }
 
 /* ---------- keyboard ---------- */
 function onKeydown(e) {
-  // Shortcuts never fire while typing (design pass 6).
-  const t = e.target;
-  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
-    if (e.key === 'Escape' && view === 'inbox' && t.id === 'inboxText') { view = 'list'; render(); }
-    return;
-  }
+  // Esc leaves the inbox from ANY focus target (textarea, checkboxes, button).
+  // Deliberately no confirm: the pasted text still lives in the source app.
   if (e.key === 'Escape' && view === 'inbox') { view = 'list'; render(); return; }
+  // Shortcuts never fire while typing (design pass 6) or with modifiers held
+  // (Cmd+D = bookmark must not archive the served clip).
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (view !== 'serve' || !servedId) return;
   const clip = clips.find((c) => c.id === servedId);
   if (!clip) return;
@@ -98,28 +119,43 @@ function onKeydown(e) {
   else if (e.key === 'o') serveOpen(clip);
 }
 
-/* ---------- editor draft preservation (eng A-4) ---------- */
-function captureEditorDraft() {
-  if (!editingId) return null;
-  const ta = mainEl.querySelector('.why-edit');
-  if (!ta) return null;
-  return { id: editingId, value: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+/* ---------- draft preservation across echo re-renders (eng A-4, adv H2) ---------- */
+function captureDrafts() {
+  const drafts = {};
+  if (editingId) {
+    const ta = mainEl.querySelector('.why-edit');
+    if (ta) drafts.note = { id: editingId, value: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+  }
+  const inboxTa = document.getElementById('inboxText');
+  if (inboxTa) drafts.inbox = { value: inboxTa.value, start: inboxTa.selectionStart, end: inboxTa.selectionEnd, focused: document.activeElement === inboxTa };
+  return drafts;
 }
-function restoreEditorDraft(draft) {
-  if (!draft || editingId !== draft.id) return;
-  const ta = mainEl.querySelector('.why-edit');
-  if (!ta) return;
-  ta.value = draft.value;
-  ta.setSelectionRange(draft.start, draft.end);
+function restoreDrafts(drafts) {
+  if (!drafts) return;
+  if (drafts.note && editingId === drafts.note.id) {
+    const ta = mainEl.querySelector('.why-edit');
+    if (ta) { ta.value = drafts.note.value; ta.setSelectionRange(drafts.note.start, drafts.note.end); }
+  }
+  if (drafts.inbox && view === 'inbox') {
+    const ta = document.getElementById('inboxText');
+    if (ta) {
+      ta.value = drafts.inbox.value;
+      ta.setSelectionRange(drafts.inbox.start, drafts.inbox.end);
+      if (drafts.inbox.focused) ta.focus();
+      parseInboxInput(ta.value); // re-annotate against the fresh clips
+    }
+  }
 }
 
 /* ---------- banner ---------- */
 function showBanner(text, kind = 'ok', ms = 4000) {
-  bannerEl.textContent = text;
+  // Unhide first, set text a frame later — a region that becomes visible and
+  // populated in the same tick is not announced by several screen readers.
   bannerEl.className = `banner ${kind}`;
   bannerEl.hidden = false;
+  setTimeout(() => { bannerEl.textContent = text; }, 30);
   clearTimeout(showBanner._t);
-  showBanner._t = setTimeout(() => { bannerEl.hidden = true; }, ms);
+  showBanner._t = setTimeout(() => { bannerEl.hidden = true; bannerEl.textContent = ''; }, ms);
 }
 function saveFailed(e) {
   console.warn('Plate: save failed', e);
@@ -130,15 +166,18 @@ function saveFailed(e) {
 // The bar lives in undoState and is re-prepended by every render() so the
 // storage echo can't wipe it mid-window.
 function offerUndo(label, undoFn) {
-  clearUndo(false);
+  clearUndo();
   undoState = { label, undoFn, timer: setTimeout(() => clearUndo(), UNDO_MS) };
-  renderUndoBar();
+  renderUndoBar(true);
 }
-function renderUndoBar() {
+function renderUndoBar(focusIt = false) {
   if (!undoState) return;
   const bar = document.createElement('div');
   bar.className = 'undo-bar';
-  bar.innerHTML = `<span>${L.escapeHtml(undoState.label)}</span>`;
+  bar.setAttribute('role', 'status');
+  const span = document.createElement('span');
+  span.textContent = undoState.label;
+  bar.appendChild(span);
   const btn = document.createElement('button');
   btn.className = 'btn';
   btn.textContent = 'Undo';
@@ -149,35 +188,58 @@ function renderUndoBar() {
   });
   bar.appendChild(btn);
   mainEl.prepend(bar);
+  // Keyboard flow: the pre-action button is gone after re-render; land focus
+  // on Undo so the action stays reachable (design focus-management finding).
+  if (focusIt) btn.focus();
 }
-function clearUndo(removeBar = true) {
+function clearUndo() {
   if (undoState) clearTimeout(undoState.timer);
   undoState = null;
-  if (removeBar) {
-    const bar = mainEl.querySelector('.undo-bar');
-    if (bar) bar.remove();
-  }
+  const bar = mainEl.querySelector('.undo-bar');
+  if (bar) bar.remove();
 }
 
 /* ---------- data ops ---------- */
+// Archive is explicit and idempotent — never a toggle (adversarial H1).
 async function doneClip(clip) {
   const now = Date.now();
   let didArchive = false;
   try {
     clips = await store.mutateClip(clip.id, (c) => {
-      const r = L.applyToggleArchive(c, now);
+      const r = L.applyArchive(c, now);
       didArchive = r.didArchive;
       return r.clip;
     });
-  } catch (e) { saveFailed(e); return false; }
-  if (didArchive) store.mutateStats((s) => L.recordDone(s, now)).catch(() => {});
-  return didArchive;
+  } catch (e) { saveFailed(e); return { didArchive: false, at: now }; }
+  if (didArchive) {
+    store.mutateStats((s) => L.recordDone(s, now)).catch(() => {});
+    cachedStats = null;
+  }
+  return { didArchive, at: now };
+}
+
+// Undo helper: only decrement stats if the unarchive actually happened, and
+// decrement the week of the ORIGINAL Done (adversarial M5).
+async function undoDone(id, doneAt) {
+  const now = Date.now();
+  let didUnarchive = false;
+  try {
+    clips = await store.mutateClip(id, (c) => {
+      const r = L.applyUnarchive(c, now);
+      didUnarchive = r.didUnarchive;
+      return r.clip;
+    });
+  } catch (e) { saveFailed(e); return; }
+  if (didUnarchive) {
+    await store.mutateStats((s) => L.recordUndoDone(s, doneAt)).catch(() => {});
+    cachedStats = null;
+  }
 }
 
 async function unarchiveClip(id) {
   const now = Date.now();
   try {
-    clips = await store.mutateClip(id, (c) => L.applyToggleArchive(c, now).clip);
+    clips = await store.mutateClip(id, (c) => L.applyUnarchive(c, now).clip);
   } catch (e) { saveFailed(e); }
 }
 
@@ -199,28 +261,29 @@ async function setWhy(id, value) {
 
 /* ---------- serve actions ---------- */
 async function serveDone(clip) {
+  servedId = null; // double-fire guard: second 'd' in the beat no-ops
   suppressRender = true;
-  const ok = await doneClip(clip);
-  if (!ok) { suppressRender = false; return; }
+  const { didArchive, at } = await doneClip(clip);
+  if (!didArchive) { suppressRender = false; render(); return; }
   const card = mainEl.querySelector('.serve-card');
   if (card) card.classList.add('rewarded');
   setTimeout(() => {
     suppressRender = false;
     render();
     offerUndo('Done', async () => {
-      await unarchiveClip(clip.id);
-      await store.mutateStats((s) => L.recordUndoDone(s, Date.now())).catch(() => {});
+      await undoDone(clip.id, at);
       render();
     });
   }, reducedMotion ? 0 : REWARD_MS);
 }
 
 async function serveNotToday(clip) {
+  servedId = null;
   const now = Date.now();
   suppressRender = true;
   try {
     clips = await store.mutateClip(clip.id, (c) => L.applySnooze(c, now));
-  } catch (e) { suppressRender = false; saveFailed(e); return; }
+  } catch (e) { suppressRender = false; saveFailed(e); render(); return; }
   const card = mainEl.querySelector('.serve-card');
   if (card) {
     card.classList.add('resting');
@@ -249,17 +312,24 @@ function serveOpen(clip) {
 /* ---------- inbox actions ---------- */
 function parseInboxInput(text) {
   const parsed = L.parseInbox(text);
-  inboxCandidates = L.dedupeCandidates(parsed.candidates, clips).map((c) => ({
-    ...c,
-    checked: c.status === 'ok'
-  }));
-  inboxCandidates.total = parsed.total;
-  inboxCandidates.capped = parsed.capped;
+  if (!dedupeIndex) dedupeIndex = L.buildDedupeIndex(clips);
+  // Preserve the user's manual checkbox choices across re-parses — fixing a
+  // typo must not silently re-check deselected lines (adversarial M2).
+  const prevChecked = new Map(
+    inboxState.candidates.map((c) => [`${c.text} ${c.url}`, c.checked])
+  );
+  const candidates = L.dedupeCandidates(parsed.candidates, dedupeIndex).map((c) => {
+    const key = `${c.text} ${c.url}`;
+    return { ...c, checked: prevChecked.has(key) ? prevChecked.get(key) : c.status === 'ok' };
+  });
+  inboxState = { candidates, total: parsed.total, capped: parsed.capped };
   renderInboxCandidates();
 }
 
 async function inboxAdd() {
-  const picked = inboxCandidates.filter((c) => c.checked);
+  const addBtn = document.getElementById('inboxAdd');
+  if (addBtn) addBtn.disabled = true; // double-click guard (adversarial M3)
+  const picked = inboxState.candidates.filter((c) => c.checked);
   if (!picked.length) return;
   const now = Date.now();
   const newClips = picked.map((c, i) =>
@@ -273,12 +343,17 @@ async function inboxAdd() {
   );
   try {
     clips = await store.prependClips(newClips);
-  } catch (e) { saveFailed(e); return; }
+  } catch (e) {
+    saveFailed(e);
+    if (addBtn) addBtn.disabled = false;
+    return;
+  }
   store.mutateStats((s) => {
     s.inboxSessions += 1;
     s.inboxClipsAdded += newClips.length;
     return s;
   }).catch(() => {});
+  cachedStats = null;
   view = 'list';
   listView = 'plate';
   render();
@@ -333,7 +408,7 @@ function renderServe(now, counts) {
 
   const quote = document.createElement('p');
   quote.className = 'serve-quote';
-  quote.innerHTML = L.escapeHtml(clip.text || '');
+  quote.textContent = clip.text || '';
   card.appendChild(quote);
 
   card.appendChild(whyBlock(clip));
@@ -350,18 +425,21 @@ function renderServe(now, counts) {
   const actions = document.createElement('div');
   actions.className = 'actions serve-actions';
   const doneBtn = mkBtn('Done', 'btn primary', () => serveDone(clip));
-  const openBtn = mkBtn('Open page', 'btn', () => serveOpen(clip));
+  const openBtn = mkBtn('Open page', 'btn ghost', () => serveOpen(clip));
   const notBtn  = mkBtn('Not today', 'btn ghost', () => serveNotToday(clip));
   actions.append(doneBtn, openBtn, notBtn);
   card.appendChild(actions);
 
   mainEl.appendChild(card);
+  mainEl.appendChild(showPlateButton());
+}
 
+function showPlateButton() {
   const escape = document.createElement('button');
   escape.className = 'show-plate';
   escape.textContent = 'show the full plate';
   escape.addEventListener('click', () => { view = 'list'; listView = 'plate'; render(); });
-  mainEl.appendChild(escape);
+  return escape;
 }
 
 /* ---- list view (v1, capped + age labels) ---- */
@@ -402,23 +480,24 @@ function listEmptyState() {
   const plateCount = clips.filter((c) => !c.archived).length;
   const el = document.createElement('div');
   el.className = 'empty';
+  const mark = '<div class="plate-mark"></div>';
   if (query) {
-    el.innerHTML = `<div class="plate-mark"></div><h3>Nothing matches</h3>
+    el.innerHTML = `${mark}<h3>Nothing matches</h3>
       <p>No clips contain “${L.escapeHtml(query)}”. Try a shorter word.</p>`;
     return el;
   }
   if (listView === 'archive') {
-    el.innerHTML = `<div class="plate-mark"></div><h3>Archive is empty</h3>
+    el.innerHTML = `${mark}<h3>Archive is empty</h3>
       <p>Clips you mark done land here, still searchable.</p>`;
     return el;
   }
   if (listView === 'all') {
-    el.innerHTML = `<div class="plate-mark"></div><h3>No clips yet</h3>
+    el.innerHTML = `${mark}<h3>No clips yet</h3>
       <p>Highlight a line on any page and save it from the right-click menu.</p>`;
     return el;
   }
   el.className = 'empty cleared';
-  el.innerHTML = `<div class="plate-mark"></div>
+  el.innerHTML = `${mark}
     <h3>${plateCount === 0 && clips.length ? 'Plate cleared' : 'Your plate is empty'}</h3>
     <p>${plateCount === 0 && clips.length
       ? 'Nice. Everything’s been dealt with.'
@@ -430,13 +509,7 @@ function emptyBlock(kind, title, text, withPlateLink) {
   const el = document.createElement('div');
   el.className = `empty ${kind}`;
   el.innerHTML = `<div class="plate-mark"></div><h3>${L.escapeHtml(title)}</h3><p>${L.escapeHtml(text)}</p>`;
-  if (withPlateLink) {
-    const link = document.createElement('button');
-    link.className = 'show-plate';
-    link.textContent = 'show the full plate';
-    link.addEventListener('click', () => { view = 'list'; listView = 'plate'; render(); });
-    el.appendChild(link);
-  }
+  if (withPlateLink) el.appendChild(showPlateButton());
   return el;
 }
 
@@ -446,14 +519,16 @@ function card(c, now) {
 
   const quote = document.createElement('p');
   quote.className = 'quote';
-  quote.innerHTML = highlight(c.text || '');
+  setHighlighted(quote, c.text || '');
   el.appendChild(quote);
 
   const meta = document.createElement('div');
   meta.className = 'meta';
   meta.appendChild(sourceLink(c, true));
   const time = document.createElement('span');
-  time.className = 'time';
+  // Age label carries meaning on plate cards → --ink-soft contrast (.age);
+  // archived timestamps stay quiet (.time).
+  time.className = c.archived ? 'time' : 'age';
   time.textContent = c.archived ? L.relTime(c.createdAt, now) : L.ageLabel(c.createdAt, now);
   meta.appendChild(time);
   el.appendChild(meta);
@@ -487,7 +562,8 @@ function sourceLink(c, withHighlight) {
   }
   src.title = c.url || '';
   const label = c.title || c.url || 'Untitled';
-  src.innerHTML = withHighlight ? highlight(label) : L.escapeHtml(label);
+  if (withHighlight) setHighlighted(src, label);
+  else src.textContent = label;
   return src;
 }
 
@@ -507,21 +583,29 @@ function whyBlock(c) {
     ta.placeholder = 'Why did you save this?';
     setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
     const commit = async () => {
+      clearTimeout(noteTimer);
       await setWhy(c.id, ta.value);
       editingId = null;
       render();
     };
+    // Popups die on any outside click and blur is not guaranteed to fire
+    // first — commit on idle too so composed notes survive (adversarial H3).
+    ta.addEventListener('input', () => {
+      clearTimeout(noteTimer);
+      noteTimer = setTimeout(() => setWhy(c.id, ta.value), NOTE_IDLE_COMMIT_MS);
+    });
     ta.addEventListener('blur', commit);
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ta.blur(); }
-      if (e.key === 'Escape') { editingId = null; render(); }
+      if (e.key === 'Escape') { clearTimeout(noteTimer); editingId = null; render(); }
     });
     return ta;
   }
   const why = document.createElement('div');
   const has = (c.why || '').length > 0;
   why.className = 'why' + (has ? '' : ' empty'); // .empty = unseasoned (dotted olive border)
-  why.innerHTML = has ? highlight(c.why) : 'Add a note — why you saved it';
+  if (has) setHighlighted(why, c.why);
+  else why.textContent = 'Add a note — why you saved it';
   why.title = 'Click to edit';
   why.addEventListener('click', () => { editingId = c.id; render(); });
   return why;
@@ -539,7 +623,7 @@ function renderInbox() {
   ta.placeholder = 'Paste your self-texts — one clip per line';
   ta.addEventListener('input', () => {
     clearTimeout(parseTimer);
-    parseTimer = setTimeout(() => parseInboxInput(ta.value), 120);
+    parseTimer = setTimeout(() => parseInboxInput(ta.value), PARSE_DEBOUNCE_MS);
   });
   wrap.appendChild(ta);
 
@@ -570,7 +654,7 @@ function renderInboxCandidates() {
   if (!list || !add) return;
   list.innerHTML = '';
 
-  const cands = inboxCandidates;
+  const cands = inboxState.candidates;
   if (cands.length) {
     const allDuped = cands.every((c) => c.status !== 'ok');
     if (allDuped) {
@@ -579,7 +663,7 @@ function renderInboxCandidates() {
       p.textContent = 'All of these are already on your plate.';
       list.appendChild(p);
     }
-    cands.forEach((cand, i) => {
+    cands.forEach((cand) => {
       const row = document.createElement('label');
       row.className = 'inbox-row';
       const cb = document.createElement('input');
@@ -592,7 +676,7 @@ function renderInboxCandidates() {
       row.appendChild(cb);
       const txt = document.createElement('span');
       txt.className = 'inbox-line';
-      txt.innerHTML = L.escapeHtml(cand.text);
+      txt.textContent = cand.text;
       row.appendChild(txt);
       if (cand.status !== 'ok') {
         const tag = document.createElement('em');
@@ -602,10 +686,10 @@ function renderInboxCandidates() {
       }
       list.appendChild(row);
     });
-    if (cands.capped) {
+    if (inboxState.capped) {
       const p = document.createElement('p');
       p.className = 'cap-note';
-      p.textContent = `Showing 200 of ${cands.total} lines.`;
+      p.textContent = `Showing ${cands.length} of ${inboxState.total} lines.`;
       list.appendChild(p);
     }
   }
@@ -627,15 +711,15 @@ function renderFooter(now) {
   } else if (listView === 'plate') {
     hintEl.innerHTML = 'Select text on any page, right-click → <b>Save selection to Plate</b>';
   } else {
-    const s = statsLine(now);
-    hintEl.textContent = s;
+    hintEl.textContent = statsLine(now);
   }
 }
 
-let cachedStats = null;
 function statsLine(now) {
   if (cachedStats) return formatStats(cachedStats, now);
-  store.readStats().then((s) => { cachedStats = s; renderFooter(now); }).catch(() => {});
+  store.readStats()
+    .then((s) => { cachedStats = s; renderFooter(now); })
+    .catch(() => { hintEl.textContent = 'stats unavailable'; });
   return '…';
 }
 function formatStats(s, now) {
@@ -646,14 +730,27 @@ function formatStats(s, now) {
 }
 
 /* ---------- helpers ---------- */
-// Escape, then wrap query matches in <mark>.
-function highlight(str) {
-  const safe = L.escapeHtml(str);
-  if (!query) return safe;
+// Highlight built with DOM nodes on the RAW string — no escape-then-regex
+// string surgery, so searching "amp"/"lt" can't split entities (security L1).
+function setHighlighted(el, raw) {
+  el.textContent = '';
+  if (!query) { el.textContent = raw; return; }
   const q = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let re;
   try {
-    return safe.replace(new RegExp(`(${q})`, 'gi'), '<mark>$1</mark>');
+    re = new RegExp(`(${q})`, 'gi');
   } catch {
-    return safe;
+    el.textContent = raw;
+    return;
   }
+  const parts = String(raw).split(re);
+  parts.forEach((part, i) => {
+    if (i % 2 === 1) {
+      const mark = document.createElement('mark');
+      mark.textContent = part;
+      el.appendChild(mark);
+    } else if (part) {
+      el.appendChild(document.createTextNode(part));
+    }
+  });
 }

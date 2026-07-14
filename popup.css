@@ -265,8 +265,8 @@ body {
   padding: 9px 14px;
   background: var(--paper);
 }
-.hint { font-size: 11px; color: var(--ink-faint); line-height: 1.4; }
-.hint b { color: var(--ink-soft); font-weight: 600; }
+.hint { font-size: 11px; color: var(--ink-soft); line-height: 1.4; }
+.hint b { color: var(--ink); font-weight: 600; }
 
 /* search highlight */
 mark {

@@ -175,6 +175,11 @@ describe('pickServeClip + snooze', () => {
     const batch = ['a', 'b', 'c'].map((t, i) => L.makeClip({ text: t, now: T0, offset: i }));
     assert.equal(L.pickServeClip(batch, T0 + 1000).text, 'a');
   });
+  test('exactly equal createdAt: first in array order wins (v1 clips, same-ms saves)', () => {
+    const a = clip({ id: 'first', createdAt: T0 });
+    const b = clip({ id: 'second', createdAt: T0 });
+    assert.equal(L.pickServeClip([a, b], T0 + 1000).id, 'first');
+  });
   test('snooze boundary: 23:59 stays snoozed, 00:00 next day wakes', () => {
     const lateNight = new Date(2026, 6, 14, 23, 59, 0).getTime();
     const snoozedAt = new Date(2026, 6, 14, 9, 0, 0).getTime();
@@ -190,32 +195,54 @@ describe('pickServeClip + snooze', () => {
   });
 });
 
-/* ---------------- archive transition ---------------- */
-describe('applyToggleArchive', () => {
-  test('false->true stamps archivedAt, clears snooze, counts as Done', () => {
+/* ---------------- archive transitions (explicit, idempotent — adv H1) ---------------- */
+describe('applyArchive / applyUnarchive', () => {
+  test('archive stamps archivedAt, clears snooze, counts as Done', () => {
     const snoozed = { ...clip({}), snoozedUntil: L.startOfNextLocalDay(T0) };
-    const { clip: c, didArchive } = L.applyToggleArchive(snoozed, T0);
+    const { clip: c, didArchive } = L.applyArchive(snoozed, T0);
     assert.equal(didArchive, true);
     assert.equal(c.archived, true);
     assert.equal(c.archivedAt, T0);
     assert.equal(c.snoozedUntil, undefined);
   });
-  test('true->false clears archivedAt and does NOT count as Done', () => {
+  test('archive is idempotent: double-fire no-ops and never un-archives', () => {
+    const once = L.applyArchive(clip({}), T0);
+    const twice = L.applyArchive(once.clip, T0 + 100);
+    assert.equal(twice.didArchive, false);
+    assert.equal(twice.clip.archived, true);
+    assert.equal(twice.clip.archivedAt, T0); // original stamp untouched
+  });
+  test('unarchive clears archivedAt, never counts as Done, idempotent', () => {
     const archived = { ...clip({}), archived: true, archivedAt: T0 - DAY };
-    const { clip: c, didArchive } = L.applyToggleArchive(archived, T0);
-    assert.equal(didArchive, false);
+    const { clip: c, didUnarchive } = L.applyUnarchive(archived, T0);
+    assert.equal(didUnarchive, true);
     assert.equal(c.archived, false);
     assert.equal(c.archivedAt, undefined);
+    const again = L.applyUnarchive(c, T0 + 100);
+    assert.equal(again.didUnarchive, false);
   });
 });
 
 /* ---------------- stats ---------------- */
 describe('stats', () => {
-  test('isoWeekKey uses ISO week-YEAR across the boundary', () => {
+  test('isoWeekKey uses ISO week-YEAR across the boundary (both directions)', () => {
     assert.equal(L.isoWeekKey(new Date(2027, 0, 1).getTime()), '2026-W53'); // Fri Jan 1 2027 -> ISO 2026-W53
     assert.equal(L.isoWeekKey(new Date(2026, 0, 1).getTime()), '2026-W01'); // Thu Jan 1 2026
     assert.equal(L.isoWeekKey(new Date(2028, 0, 2).getTime()), '2027-W52'); // Sun Jan 2 2028 -> ISO 2027-W52
+    assert.equal(L.isoWeekKey(new Date(2030, 11, 30).getTime()), '2031-W01'); // Mon Dec 30 2030 -> next ISO year
+    assert.equal(L.isoWeekKey(new Date(2030, 11, 31).getTime()), '2031-W01');
     assert.equal(L.isoWeekKey(T0), '2026-W29');
+  });
+  test('recordUndoDone with the ORIGINAL done timestamp decrements the original week (Sunday-midnight undo edge)', () => {
+    const sundayLate = new Date(2026, 6, 19, 23, 59, 59).getTime(); // ISO 2026-W29
+    let s = L.recordDone(L.defaultStats(), sundayLate);
+    assert.equal(s.donesByWeek['2026-W29'], 1);
+    s = L.recordUndoDone(s, sundayLate); // undo passes the done-at time, not "now"
+    assert.equal(s.donesByWeek['2026-W29'], 0);
+  });
+  test('recordUndoDone on empty stats is a safe no-op', () => {
+    const s = L.recordUndoDone(L.defaultStats(), T0);
+    assert.deepEqual(s.donesByWeek, {});
   });
   test('recordDone/recordUndoDone round-trip within a week', () => {
     let s = L.recordDone(L.defaultStats(), T0);
@@ -251,6 +278,32 @@ describe('staleness + display helpers', () => {
     assert.equal(L.ageLabel(T0 - 3 * DAY, T0), '3 days on the plate');
     assert.equal(L.ageLabel(T0 - 21 * DAY, T0), '3 weeks on the plate');
     assert.equal(L.ageLabel(T0, T0), 'served fresh today');
+  });
+  test('relTime boundaries (injected now)', () => {
+    assert.equal(L.relTime(0, T0), '');
+    assert.equal(L.relTime(T0 - 59_000, T0), 'just now');
+    assert.equal(L.relTime(T0 + 60_000, T0), 'just now'); // future ts: negative delta floors safe
+    assert.equal(L.relTime(T0 - 60_000, T0), '1m ago');
+    assert.equal(L.relTime(T0 - 60 * 60_000, T0), '1h ago');
+    assert.equal(L.relTime(T0 - DAY, T0), '1d ago');
+    assert.equal(L.relTime(T0 - 7 * DAY, T0), '1w ago');
+    assert.equal(L.relTime(T0 - 4 * 7 * DAY, T0), '4w ago');
+    assert.match(L.relTime(T0 - 40 * DAY, T0), /\d/); // locale date fallback
+  });
+  test('escapeHtml also escapes single quotes (attribute-context safety)', () => {
+    assert.equal(L.escapeHtml("it's <b>"), 'it&#39;s &lt;b&gt;');
+  });
+  test('buildDedupeIndex reuse gives identical results to passing clips', () => {
+    const existing = [clip({ text: 'known', url: 'https://k.com/x' })];
+    const cands = L.parseInbox('known\nhttps://k.com/x\nfresh').candidates;
+    const viaClips = L.dedupeCandidates(cands, existing).map((c) => c.status);
+    const viaIndex = L.dedupeCandidates(cands, L.buildDedupeIndex(existing)).map((c) => c.status);
+    assert.deepEqual(viaClips, viaIndex);
+  });
+  test('parseInbox caps raw input before regex work (hostile one-line paste)', () => {
+    const huge = 'word '.repeat(200_000); // ~1MB single line, no URL
+    const r = L.parseInbox(huge);
+    assert.equal(r.total, 1); // sliced, parsed as one text candidate, no hang
   });
   test('safeHref allows only http/https', () => {
     assert.equal(L.safeHref('https://x.com/a'), 'https://x.com/a');
@@ -303,7 +356,7 @@ describe('storage helper', () => {
     const clips = await store.readClips();
     assert.deepEqual(new Set(clips.map((c) => c.id)), new Set(['seed', 'from-popup', 'from-background']));
   });
-  test('control: the same interleaving WITHOUT locks can drop a write (documents why locks exist)', async () => {
+  test('control: the same interleaving WITHOUT locks DROPS a write (documents why locks exist)', async () => {
     const area = fakeArea();
     const store = S.createStore(area, null);
     await store.mutateClips(() => [clip({ id: 'seed' })]);
@@ -312,7 +365,12 @@ describe('storage helper', () => {
       store.prependClips([clip({ id: 'b' })])
     ]);
     const clips = await store.readClips();
-    assert.ok(clips.length <= 3, 'lock-less interleave demonstrates the hazard');
+    // Deterministic with fakeArea's double-microtask set(): both prepends read
+    // [seed] before either writes, so the second write clobbers the first.
+    assert.equal(clips.length, 2, 'exactly one of a/b must be lost lock-less');
+    const ids = new Set(clips.map((c) => c.id));
+    assert.ok(ids.has('seed'));
+    assert.ok(ids.has('a') !== ids.has('b'), 'one write survived, one was dropped');
   });
   test('mutateClip on unknown id skips the write', async () => {
     const area = fakeArea();
