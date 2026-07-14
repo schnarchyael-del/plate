@@ -71,7 +71,10 @@ async function init() {
   store.mutateStats((s) => { s.popupOpens += 1; return s; }).catch(() => {});
   cachedStats = null;
 
-  view = L.plateCounts(clips, Date.now()).servable > 0 ? 'serve' : 'list';
+  // Serve mode whenever the plate has clips — renderServe itself shows the
+  // "plate rests until tomorrow" state when everything is snoozed. Routing on
+  // servable>0 skipped that state entirely (QA ISSUE-003).
+  view = L.plateCounts(clips, Date.now()).plate > 0 ? 'serve' : 'list';
   render();
 
   searchEl.addEventListener('input', () => {
