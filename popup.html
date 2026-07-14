@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="popup.css" />
+  <title>Plate</title>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="wordmark">Plate</span>
+      <span class="tally" id="tally" aria-live="polite"></span>
+    </div>
+    <div class="search-wrap">
+      <input
+        id="search"
+        type="search"
+        class="search"
+        placeholder="Find in your clips…"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+    <nav class="segments" role="tablist" aria-label="View">
+      <button class="segment is-active" data-view="plate" role="tab">Plate</button>
+      <button class="segment" data-view="archive" role="tab">Archive</button>
+      <button class="segment" data-view="all" role="tab">All</button>
+    </nav>
+  </header>
+
+  <main id="list" class="list" aria-live="polite"></main>
+
+  <footer class="foot">
+    <span class="hint">Select text on any page, right-click → <b>Save selection to Plate</b></span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

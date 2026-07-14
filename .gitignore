@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# packaged builds
+*.zip
+*.crx
+*.pem
+
+# editor
+.vscode/
+.idea/
+
+# local secrets (API keys, etc.) — never commit these
+*.local.json
+.env
