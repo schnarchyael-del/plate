@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<!-- QA harness: the REAL popup (html/css/js untouched) with chrome.* stubbed.
+     Not shipped — the CWS zip enumerates files explicitly.
+     Seeds via ?seed=full|empty|cleared|allsnoozed -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="../../popup.css" />
+  <title>Plate QA Harness</title>
+  <style>html, body { margin: 20px auto; }</style>
+</head>
+<body>
+  <header class="top" id="header">
+    <div class="brand">
+      <span class="wordmark">Plate</span>
+      <span class="tally" id="tally" aria-live="polite"></span>
+      <button class="btn ghost inbox-btn" id="inboxBtn" hidden>Inbox</button>
+      <button class="btn ghost inbox-btn" id="backBtn" hidden>&larr; Back</button>
+    </div>
+    <div class="search-wrap" id="searchWrap">
+      <input id="search" type="search" class="search" placeholder="Find in your clips…" autocomplete="off" spellcheck="false" />
+    </div>
+    <nav class="segments" id="segments" role="tablist" aria-label="View">
+      <button class="segment is-active" data-view="plate" role="tab">Plate</button>
+      <button class="segment" data-view="archive" role="tab">Archive</button>
+      <button class="segment" data-view="all" role="tab">All</button>
+    </nav>
+  </header>
+
+  <div id="banner" class="banner" hidden aria-live="polite"></div>
+
+  <main id="main" class="list"></main>
+
+  <footer class="foot" id="foot">
+    <span class="hint" id="hint"></span>
+  </footer>
+
+  <script>
+    // ---- chrome.* stub ----
+    (function () {
+      const DAY = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const listeners = [];
+      const data = {};
+
+      function clip(over) {
+        return Object.assign({
+          id: Math.random().toString(16).slice(2),
+          text: 'quote', url: 'https://example.com/a', title: 'Example page',
+          why: '', archived: false, createdAt: now
+        }, over);
+      }
+
+      const seeds = {
+        full: [
+          clip({ id: 'old', text: 'The oldest thought on the plate, waiting the longest — twenty days and counting.', title: 'A long read about patience', url: 'https://example.com/patience', createdAt: now - 20 * DAY }),
+          clip({ id: 'mid', text: 'Ampersands & entities: a test quote with symbols <tags> "quotes" and \'apostrophes\'.', title: 'Symbols & sons', url: 'https://example.com/amp?a=1&b=2', why: 'test the search highlighter', createdAt: now - 8 * DAY }),
+          clip({ id: 'noted', text: 'A fresh clip saved today with a note attached.', title: 'Today article', url: 'https://example.com/today', why: '#send Dana this one', createdAt: now - 3 * 60 * 60 * 1000 }),
+          clip({ id: 'snoozed', text: 'A snoozed clip resting until tomorrow.', title: 'Rest page', url: 'https://example.com/rest', createdAt: now - 5 * DAY, snoozedUntil: now + 12 * 60 * 60 * 1000 }),
+          clip({ id: 'arch1', text: 'An archived clip from a month ago.', title: 'Archive fodder', url: 'https://example.com/old', why: 'was useful', archived: true, createdAt: now - 30 * DAY, archivedAt: now - 29 * DAY }),
+          clip({ id: 'arch2', text: 'Another done thing.', title: 'Done page', url: 'https://example.com/done', archived: true, createdAt: now - 10 * DAY, archivedAt: now - 9 * DAY })
+        ],
+        empty: [],
+        cleared: [
+          clip({ id: 'c1', text: 'Everything done.', archived: true, createdAt: now - 3 * DAY, archivedAt: now - DAY })
+        ],
+        allsnoozed: [
+          clip({ id: 's1', text: 'Snoozed one.', createdAt: now - 2 * DAY, snoozedUntil: now + 10 * 60 * 60 * 1000 }),
+          clip({ id: 's2', text: 'Snoozed two.', createdAt: now - 4 * DAY, snoozedUntil: now + 10 * 60 * 60 * 1000 })
+        ]
+      };
+
+      const seed = new URLSearchParams(location.search).get('seed') || 'full';
+      data.clips = seeds[seed] || seeds.full;
+      data.stats = { donesByWeek: {}, inboxSessions: 2, inboxClipsAdded: 9, popupOpens: 14 };
+
+      globalThis.__harness = { opened: [], data };
+
+      globalThis.chrome = {
+        storage: {
+          local: {
+            async get(key) {
+              await Promise.resolve();
+              return { [key]: structuredClone(data[key]) };
+            },
+            async set(obj) {
+              await Promise.resolve();
+              const changes = {};
+              for (const [k, v] of Object.entries(obj)) {
+                changes[k] = { oldValue: structuredClone(data[k]), newValue: structuredClone(v) };
+                data[k] = structuredClone(v);
+              }
+              setTimeout(() => listeners.forEach((fn) => fn(changes, 'local')), 0);
+            }
+          },
+          onChanged: { addListener(fn) { listeners.push(fn); } }
+        },
+        tabs: {
+          create({ url }) { globalThis.__harness.opened.push(url); }
+        },
+        runtime: {}
+      };
+
+      // Simulates a context-menu save from the service worker (echo test).
+      globalThis.__simulateExternalSave = function (text) {
+        const c = clip({ id: 'ext-' + Date.now(), text: text || 'Externally saved clip', createdAt: Date.now() });
+        const next = [c, ...data.clips];
+        chrome.storage.local.set({ clips: next });
+      };
+    })();
+  </script>
+  <script src="../../logic.js"></script>
+  <script src="../../storage.js"></script>
+  <script src="../../popup.js"></script>
+</body>
+</html>
