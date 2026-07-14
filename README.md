@@ -6,7 +6,7 @@ Save a sentence or paragraph, keep the link, jot why you saved it. The plate ser
 - Highlight text on any page → right-click → **Save selection to Plate**
 - Each clip stores: the selected text, the page title + link, an optional "why I saved it" note, and when you saved it
 - **The plate serves you** (v2): opening the popup shows ONE clip — the oldest on your plate — with **Done**, **Open page**, and **Not today** (rests it until tomorrow). Keyboard: `d` / `o` / `n`. Both Done and Not today give you 3 seconds to undo. "show the full plate" gets you the list.
-- **Phone inbox** (v2): keep texting yourself links and lines from your phone. Back at the desk, hit **Inbox** in the list view, paste the blob, and each line becomes a clip in one tap. Duplicates are detected and unchecked automatically.
+- **Phone inbox** (v2): keep texting yourself links and lines from your phone. Back at the desk, hit **Inbox** in the list view, paste the blob, and each line becomes a clip in one tap. Duplicates are detected and unchecked automatically. Plate recovers source links from your pastes: a URL at the end of a line becomes that clip's source, a quote followed by a link on the next line pairs into one clip, and Android Chrome "share selection" highlight links unpack into quote + source. **Phone tip:** share the selection instead of copying it — the link comes along for free.
 - **Plate** = your active working set. The toolbar badge shows how many are on it — and turns **amber** when the oldest clip has sat more than two weeks.
 - **Done** moves a clip to the **Archive** — off the plate, still fully searchable, never deleted
 - Search matches across the text, note, title, and URL, in whichever view you're in (use **All** to search everything)
