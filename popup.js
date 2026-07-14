@@ -32,6 +32,8 @@ let undoState = null;      // { label, undo:fn, timer }
 let inboxCandidates = [];  // annotated candidates in the inbox view
 let searchTimer = null;
 let parseTimer = null;
+let suppressRender = false; // true during the serve reward beat so the
+                            // storage echo can't stomp the choreography
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 init();
@@ -72,6 +74,7 @@ async function init() {
     if (area !== 'local' || !changes[PlateStore.CLIPS_KEY]) return;
     const v = changes[PlateStore.CLIPS_KEY].newValue;
     clips = Array.isArray(v) ? v : [];
+    if (suppressRender) return; // beat in progress; its timeout renders
     const draft = captureEditorDraft();
     render();
     restoreEditorDraft(draft);
@@ -124,27 +127,36 @@ function saveFailed(e) {
 }
 
 /* ---------- undo (commit-immediately, undo compensates — eng E-2) ---------- */
+// The bar lives in undoState and is re-prepended by every render() so the
+// storage echo can't wipe it mid-window.
 function offerUndo(label, undoFn) {
-  clearUndo();
+  clearUndo(false);
+  undoState = { label, undoFn, timer: setTimeout(() => clearUndo(), UNDO_MS) };
+  renderUndoBar();
+}
+function renderUndoBar() {
+  if (!undoState) return;
   const bar = document.createElement('div');
   bar.className = 'undo-bar';
-  bar.innerHTML = `<span>${L.escapeHtml(label)}</span>`;
+  bar.innerHTML = `<span>${L.escapeHtml(undoState.label)}</span>`;
   const btn = document.createElement('button');
   btn.className = 'btn';
   btn.textContent = 'Undo';
   btn.addEventListener('click', async () => {
+    const fn = undoState && undoState.undoFn;
     clearUndo();
-    try { await undoFn(); } catch (e) { saveFailed(e); }
+    if (fn) { try { await fn(); } catch (e) { saveFailed(e); } }
   });
   bar.appendChild(btn);
   mainEl.prepend(bar);
-  undoState = { timer: setTimeout(clearUndo, UNDO_MS) };
 }
-function clearUndo() {
+function clearUndo(removeBar = true) {
   if (undoState) clearTimeout(undoState.timer);
   undoState = null;
-  const bar = mainEl.querySelector('.undo-bar');
-  if (bar) bar.remove();
+  if (removeBar) {
+    const bar = mainEl.querySelector('.undo-bar');
+    if (bar) bar.remove();
+  }
 }
 
 /* ---------- data ops ---------- */
@@ -187,11 +199,13 @@ async function setWhy(id, value) {
 
 /* ---------- serve actions ---------- */
 async function serveDone(clip) {
+  suppressRender = true;
   const ok = await doneClip(clip);
-  if (!ok) return;
+  if (!ok) { suppressRender = false; return; }
   const card = mainEl.querySelector('.serve-card');
   if (card) card.classList.add('rewarded');
   setTimeout(() => {
+    suppressRender = false;
     render();
     offerUndo('Done', async () => {
       await unarchiveClip(clip.id);
@@ -203,9 +217,10 @@ async function serveDone(clip) {
 
 async function serveNotToday(clip) {
   const now = Date.now();
+  suppressRender = true;
   try {
     clips = await store.mutateClip(clip.id, (c) => L.applySnooze(c, now));
-  } catch (e) { saveFailed(e); return; }
+  } catch (e) { suppressRender = false; saveFailed(e); return; }
   const card = mainEl.querySelector('.serve-card');
   if (card) {
     card.classList.add('resting');
@@ -215,6 +230,7 @@ async function serveNotToday(clip) {
     card.appendChild(note);
   }
   setTimeout(() => {
+    suppressRender = false;
     render();
     offerUndo('Resting until tomorrow', async () => {
       try {
@@ -286,22 +302,14 @@ function render() {
   backBtn.hidden = view !== 'inbox';
   segments.forEach((b) => b.classList.toggle('is-active', b.dataset.view === listView));
 
-  clearUndoIfStale();
   mainEl.innerHTML = '';
 
   if (view === 'serve') renderServe(now, counts);
   else if (view === 'inbox') renderInbox();
   else renderList(now);
 
+  renderUndoBar(); // survives re-renders during its 3s window
   renderFooter(now);
-}
-
-function clearUndoIfStale() {
-  // undo bar is re-prepended by offerUndo after render when active
-  if (!undoState) {
-    const bar = mainEl.querySelector('.undo-bar');
-    if (bar) bar.remove();
-  }
 }
 
 /* ---- serve view ---- */
