@@ -265,8 +265,8 @@ async function inboxAdd() {
   const newClips = picked.map((c, i) =>
     L.makeClip({
       text: c.text,
-      url: c.kind === 'link' ? c.url : '',
-      title: c.kind === 'link' ? c.url : 'From phone inbox',
+      url: c.url || '', // link recovery (D25): paired/trailing/highlight URLs attach as source
+      title: c.url ? c.url : 'From phone inbox',
       now,
       offset: i
     })

@@ -35,8 +35,31 @@
     }
   }
 
+  // Chrome "share selection" highlight links carry the quote inside the URL:
+  //   https://site.com/a#:~:text=[prefix-,]start[,end][,-suffix]
+  // Returns the decoded quote, or null if this isn't (or is a malformed)
+  // text-fragment link — callers fall back to a plain link clip.
+  function decodeTextFragment(href) {
+    try {
+      const hash = new URL(href).hash;
+      const m = hash.match(/:~:text=([^&]*)/);
+      if (!m || !m[1]) return null;
+      const core = m[1].split(',').filter((p) => !p.endsWith('-') && !p.startsWith('-'));
+      if (!core.length) return null;
+      const start = decodeURIComponent(core[0]);
+      const end = core[1] ? decodeURIComponent(core[1]) : '';
+      const quote = end ? `${start} … ${end}` : start;
+      return cleanLine(quote) || null;
+    } catch {
+      return null;
+    }
+  }
+
   // parseInbox(text) -> { candidates, total, capped }
-  // Dumb, predictable: strip \r, split on \n, clean, drop blanks.
+  // Dumb, predictable: strip \r, split on \n, clean, drop blanks. Link
+  // recovery (D25): a highlight link becomes quote+source; a trailing URL
+  // becomes the line's source; a quote line followed by a URL-only line
+  // pairs into one clip.
   function parseInbox(text) {
     const lines = String(text).replace(/\r/g, '').split('\n');
     const all = [];
@@ -44,13 +67,35 @@
       const line = cleanLine(raw);
       if (!line) continue;
       const url = lineAsUrl(line);
-      if (url) all.push({ kind: 'link', text: line, url });
-      else all.push({ kind: 'text', text: line, url: '' });
+      if (url) {
+        const quote = decodeTextFragment(url);
+        if (quote) all.push({ kind: 'text', text: quote, url });
+        else all.push({ kind: 'link', text: line, url });
+        continue;
+      }
+      const tm = line.match(/^(.*\S)\s+(https?:\/\/\S+)$/);
+      if (tm) {
+        const tUrl = normalizeUrl(tm[2]);
+        if (tUrl) { all.push({ kind: 'text', text: tm[1], url: tUrl }); continue; }
+      }
+      all.push({ kind: 'text', text: line, url: '' });
+    }
+    // Pairing pass: quote line + bare link line -> one clip.
+    const merged = [];
+    for (let i = 0; i < all.length; i++) {
+      const cur = all[i];
+      const next = all[i + 1];
+      if (cur.kind === 'text' && !cur.url && next && next.kind === 'link') {
+        merged.push({ kind: 'text', text: cur.text, url: next.url });
+        i++;
+        continue;
+      }
+      merged.push(cur);
     }
     return {
-      candidates: all.slice(0, INBOX_RENDER_CAP),
-      total: all.length,
-      capped: all.length > INBOX_RENDER_CAP
+      candidates: merged.slice(0, INBOX_RENDER_CAP),
+      total: merged.length,
+      capped: merged.length > INBOX_RENDER_CAP
     };
   }
 

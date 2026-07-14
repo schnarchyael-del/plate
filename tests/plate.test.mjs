@@ -29,10 +29,15 @@ describe('parseInbox', () => {
     const r = L.parseInbox('example.com/article\nwww.example.com');
     assert.deepEqual(r.candidates.map((c) => c.kind), ['text', 'text']);
   });
-  test('url + text line is a text clip keeping the url inside', () => {
-    const r = L.parseInbox('read this https://example.com/x');
-    assert.equal(r.candidates[0].kind, 'text');
-    assert.match(r.candidates[0].text, /https:\/\/example\.com\/x/);
+  test('url + text line is a text clip; a TRAILING url is extracted as source (D25), a mid-line url stays in the text', () => {
+    const trailing = L.parseInbox('read this https://example.com/x').candidates[0];
+    assert.equal(trailing.kind, 'text');
+    assert.equal(trailing.text, 'read this');
+    assert.equal(trailing.url, 'https://example.com/x');
+    const mid = L.parseInbox('see https://example.com/x for details').candidates[0];
+    assert.equal(mid.kind, 'text');
+    assert.match(mid.text, /https:\/\/example\.com\/x/);
+    assert.equal(mid.url, '');
   });
   test('blank lines, whitespace-only, CRLF, NBSP and zero-width are handled', () => {
     const r = L.parseInbox('one\r\n\r\n   \n ​\ntwo\r\n');
@@ -57,11 +62,60 @@ describe('parseInbox', () => {
     const r = L.parseInbox('x'.repeat(100_000));
     assert.equal(r.total, 1);
   });
-  test('WhatsApp-shaped blob: timestamp prefix lines become junk text candidates the checkbox flow can drop (PLACEHOLDER FIXTURE — replace with a real blob from the confirmed Android channel before ship)', () => {
+  test('WhatsApp-shaped blob: timestamp prefix lines become text candidates; trailing-URL rule recovers the link (PLACEHOLDER FIXTURE — replace with a real blob from the confirmed Android channel before ship)', () => {
     const blob = '[10:23, 14/07/2026] Yael: https://example.com/save-me\n[10:24, 14/07/2026] Yael: remember this line';
     const r = L.parseInbox(blob);
-    // Dumb rule: prefixed lines are text (url kept inside). Documents current behavior.
     assert.deepEqual(r.candidates.map((c) => c.kind), ['text', 'text']);
+    // trailing-URL extraction strips the URL off the prefixed line and keeps it as source
+    assert.equal(r.candidates[0].url, 'https://example.com/save-me');
+    assert.equal(r.candidates[0].text, '[10:23, 14/07/2026] Yael:');
+  });
+
+  describe('link recovery (D25)', () => {
+    test('trailing URL splits into quote + source', () => {
+      const [c] = L.parseInbox('the best products start small https://blog.example.com/article').candidates;
+      assert.equal(c.kind, 'text');
+      assert.equal(c.text, 'the best products start small');
+      assert.equal(c.url, 'https://blog.example.com/article');
+    });
+    test('quote line followed by URL-only line pairs into one clip', () => {
+      const r = L.parseInbox('a line worth keeping\nhttps://example.com/source');
+      assert.equal(r.candidates.length, 1);
+      assert.equal(r.candidates[0].text, 'a line worth keeping');
+      assert.equal(r.candidates[0].url, 'https://example.com/source');
+    });
+    test('pairing is one-shot and ordered: link-then-quote does NOT pair; two links do NOT pair', () => {
+      const r1 = L.parseInbox('https://example.com/a\nsome text after');
+      assert.equal(r1.candidates.length, 2);
+      const r2 = L.parseInbox('https://example.com/a\nhttps://example.com/b');
+      assert.deepEqual(r2.candidates.map((c) => c.kind), ['link', 'link']);
+    });
+    test('a quote that already has a trailing URL does not also swallow the next link line', () => {
+      const r = L.parseInbox('quote https://example.com/a\nhttps://example.com/b');
+      assert.equal(r.candidates.length, 2);
+      assert.equal(r.candidates[0].url, 'https://example.com/a');
+      assert.equal(r.candidates[1].kind, 'link');
+    });
+    test('Chrome highlight link decodes into quote + source', () => {
+      const [c] = L.parseInbox('https://example.com/a#:~:text=hello%20world').candidates;
+      assert.equal(c.kind, 'text');
+      assert.equal(c.text, 'hello world');
+      assert.equal(c.url, 'https://example.com/a#:~:text=hello%20world');
+    });
+    test('highlight link with prefix/suffix and start,end decodes to "start … end"', () => {
+      const [c] = L.parseInbox('https://example.com/a#:~:text=pre-,start%20text,end%20text,-suf').candidates;
+      assert.equal(c.text, 'start text … end text');
+    });
+    test('malformed highlight fragment falls back to a plain link clip', () => {
+      const [c] = L.parseInbox('https://example.com/a#:~:text=%E0%A4%A').candidates;
+      assert.equal(c.kind, 'link');
+    });
+    test('cap and total are computed after pairing', () => {
+      const blob = Array.from({ length: 30 }, (_, i) => `quote ${i}\nhttps://example.com/${i}`).join('\n');
+      const r = L.parseInbox(blob);
+      assert.equal(r.total, 30);
+      assert.equal(r.candidates.every((c) => c.url), true);
+    });
   });
 });
 
