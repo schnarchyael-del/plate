@@ -17,6 +17,8 @@
 }
 
 * { box-sizing: border-box; }
+/* display:flex on .segments etc. would otherwise defeat the hidden attribute */
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
