@@ -1,16 +1,23 @@
 // Plate — background service worker
-// Handles the right-click "Save selection to Plate" action and keeps the
-// toolbar badge showing how many clips are on the active plate.
+// Right-click "Save selection to Plate", badge count + staleness color.
+// All clip writes go through PlateStore (locks-wrapped) — never write
+// chrome.storage directly from here.
 
-const STORAGE_KEY = 'clips';
+importScripts('logic.js', 'storage.js');
+
+const store = PlateStore.createStore(chrome.storage.local, navigator.locks);
 const PLATE_GREEN = '#3D5A40';
 const SAVED_GREEN = '#3F9142';
+const STALE_AMBER = '#C88A3A';
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: 'save-to-plate',
-    title: 'Save selection to Plate',
-    contexts: ['selection']
+  // removeAll first: onInstalled re-fires on update and duplicate ids error.
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'save-to-plate',
+      title: 'Save selection to Plate',
+      contexts: ['selection']
+    });
   });
   updateBadge();
 });
@@ -23,54 +30,51 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const text = (info.selectionText || '').trim();
   if (!text) return;
 
-  const clip = {
-    id: makeId(),
+  const clip = PlateLogic.makeClip({
     text,
     url: (tab && tab.url) || '',
     title: (tab && tab.title) || (tab && tab.url) || 'Untitled',
-    why: '',
-    archived: false,
-    createdAt: Date.now()
-  };
+    now: Date.now()
+  });
 
-  const clips = await getClips();
-  clips.unshift(clip);
-  await setClips(clips);
-  flashSaved();
+  try {
+    await store.prependClips([clip]);
+    flashSaved();
+  } catch (e) {
+    // No UI surface here; the popup shows the banner on its own failures.
+    console.warn('Plate: save failed', e);
+    chrome.action.setBadgeText({ text: '!' });
+    chrome.action.setBadgeBackgroundColor({ color: STALE_AMBER });
+    setTimeout(updateBadge, 2000);
+  }
 });
 
 // Keep the badge in sync when the popup archives / deletes / edits.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes[STORAGE_KEY]) updateBadge();
+  if (area === 'local' && changes[PlateStore.CLIPS_KEY]) updateBadge();
 });
 
-function getClips() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get([STORAGE_KEY], (r) => resolve(r[STORAGE_KEY] || []));
-  });
-}
-
-function setClips(clips) {
-  return new Promise((resolve) => {
-    chrome.storage.local.set({ [STORAGE_KEY]: clips }, resolve);
-  });
-}
-
 async function updateBadge() {
-  const clips = await getClips();
-  const count = clips.filter((c) => !c.archived).length;
-  chrome.action.setBadgeText({ text: count ? String(count) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: PLATE_GREEN });
+  let clips = [];
+  try {
+    clips = await store.readClips();
+  } catch (e) {
+    console.warn('Plate: badge read failed', e);
+    return;
+  }
+  const now = Date.now();
+  const { plate } = PlateLogic.plateCounts(clips, now);
+  // Amber when the oldest servable clip has sat > 14 days — the ambient
+  // "your plate is going stale" signal (gate decision D21).
+  const color = PlateLogic.isPlateStale(clips, now) ? STALE_AMBER : PLATE_GREEN;
+  chrome.action.setBadgeText({ text: plate ? String(plate) : '' });
+  chrome.action.setBadgeBackgroundColor({ color });
 }
 
 // Brief confirmation tick after a save, then fall back to the real count.
+// Known debt (TODOS): SW can be reaped mid-timeout, stranding the ✓ briefly.
 function flashSaved() {
   chrome.action.setBadgeText({ text: '✓' });
   chrome.action.setBadgeBackgroundColor({ color: SAVED_GREEN });
   setTimeout(updateBadge, 1100);
-}
-
-function makeId() {
-  if (crypto && crypto.randomUUID) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }

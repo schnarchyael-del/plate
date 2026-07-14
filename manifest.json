@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Plate",
-  "version": "1.0.0",
-  "description": "Save a sentence or paragraph, keep the link, jot why you saved it. Clear your plate, keep the archive.",
+  "version": "2.0.0",
+  "description": "Save a sentence or paragraph, keep the link, jot why you saved it. The plate serves you one clip at a time; clear it, keep the archive.",
   "permissions": ["storage", "contextMenus", "activeTab"],
   "background": {
     "service_worker": "background.js"

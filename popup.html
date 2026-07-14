@@ -7,12 +7,14 @@
   <title>Plate</title>
 </head>
 <body>
-  <header class="top">
+  <header class="top" id="header">
     <div class="brand">
       <span class="wordmark">Plate</span>
       <span class="tally" id="tally" aria-live="polite"></span>
+      <button class="btn ghost inbox-btn" id="inboxBtn" hidden>Inbox</button>
+      <button class="btn ghost inbox-btn" id="backBtn" hidden>&larr; Back</button>
     </div>
-    <div class="search-wrap">
+    <div class="search-wrap" id="searchWrap">
       <input
         id="search"
         type="search"
@@ -22,19 +24,23 @@
         spellcheck="false"
       />
     </div>
-    <nav class="segments" role="tablist" aria-label="View">
+    <nav class="segments" id="segments" role="tablist" aria-label="View">
       <button class="segment is-active" data-view="plate" role="tab">Plate</button>
       <button class="segment" data-view="archive" role="tab">Archive</button>
       <button class="segment" data-view="all" role="tab">All</button>
     </nav>
   </header>
 
-  <main id="list" class="list" aria-live="polite"></main>
+  <div id="banner" class="banner" hidden aria-live="polite"></div>
 
-  <footer class="foot">
-    <span class="hint">Select text on any page, right-click → <b>Save selection to Plate</b></span>
+  <main id="main" class="list" aria-live="polite"></main>
+
+  <footer class="foot" id="foot">
+    <span class="hint" id="hint"></span>
   </footer>
 
+  <script src="logic.js"></script>
+  <script src="storage.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

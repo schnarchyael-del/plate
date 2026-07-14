@@ -1,13 +1,16 @@
 # Plate
 
-Save a sentence or paragraph, keep the link, jot why you saved it. Clear your plate, keep the archive.
+Save a sentence or paragraph, keep the link, jot why you saved it. The plate serves you one clip at a time; clear it, keep the archive.
 
 ## What it does
 - Highlight text on any page → right-click → **Save selection to Plate**
 - Each clip stores: the selected text, the page title + link, an optional "why I saved it" note, and when you saved it
-- **Plate** = your active working set. The toolbar badge shows how many are on it.
+- **The plate serves you** (v2): opening the popup shows ONE clip — the oldest on your plate — with **Done**, **Open page**, and **Not today** (rests it until tomorrow). Keyboard: `d` / `o` / `n`. Both Done and Not today give you 3 seconds to undo. "show the full plate" gets you the list.
+- **Phone inbox** (v2): keep texting yourself links and lines from your phone. Back at the desk, hit **Inbox** in the list view, paste the blob, and each line becomes a clip in one tap. Duplicates are detected and unchecked automatically.
+- **Plate** = your active working set. The toolbar badge shows how many are on it — and turns **amber** when the oldest clip has sat more than two weeks.
 - **Done** moves a clip to the **Archive** — off the plate, still fully searchable, never deleted
 - Search matches across the text, note, title, and URL, in whichever view you're in (use **All** to search everything)
+- **Local stats** (footer of Archive/All views): dones this week, note fill rate, inbox sessions. Nothing ever leaves your machine.
 
 ## Install (load unpacked)
 1. Unzip this folder somewhere you'll keep it (don't delete it later — Chrome loads it from disk)
@@ -20,3 +23,13 @@ Save a sentence or paragraph, keep the link, jot why you saved it. Clear your pl
 - Everything is stored locally in your browser (`chrome.storage.local`). No account, no server, no API. Works offline.
 - To edit a note, click the note line on any card. Cmd/Ctrl+Enter or clicking away saves; Esc cancels.
 - Also works in any Chromium browser (Edge, Brave, Arc) via the same load-unpacked steps.
+- Tip: write `#work` or `#send Dana` in a note — search for `#send` and that's your tag filter.
+
+## Data (v2 schema)
+- `clips`: array of `{ id, text, url, title, why, archived, createdAt, updatedAt, archivedAt?, snoozedUntil? }`. v1 clips (without the newer fields) keep working untouched.
+- `stats`: `{ donesByWeek: { "2026-W29": n }, inboxSessions, popupOpens, inboxClipsAdded }` — local only, single writer (the popup).
+- All writes go through `storage.js` (`navigator.locks`-serialized); pure rules live in `logic.js`.
+
+## Development
+- No build step. Load unpacked, edit, reload.
+- Tests (zero dependencies): `node --test tests/plate.test.mjs` — also run with `TZ=America/Santiago` and `TZ=UTC` for the timezone cases.
