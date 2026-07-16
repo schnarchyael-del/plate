@@ -280,6 +280,78 @@ mark {
   padding: 0 1px;
 }
 
+/* ---- tags ---- */
+.tag-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: -4px 0 10px;
+}
+.tag-chip {
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
+}
+.tag-chip:hover { color: var(--green); border-color: var(--green); }
+.tag-chip.active {
+  background: var(--green-soft);
+  border-color: var(--green);
+  color: var(--green);
+}
+.tag-chip:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 8px;
+}
+.card-tags .tag-chip.small {
+  cursor: default;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.tag-x {
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 12px;
+  padding: 0 0 0 4px;
+  cursor: pointer;
+  line-height: 1;
+}
+.tag-x:hover { color: var(--danger); }
+.tag-add {
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 999px;
+}
+.tag-add:hover { color: var(--green); }
+.tag-input {
+  width: 110px;
+  border: 1px solid var(--green);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  color: var(--ink);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--green-soft);
+}
+
 /* ---- serve mode ---- */
 .serve-card {
   padding: 18px 16px 14px;

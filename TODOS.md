@@ -4,7 +4,7 @@ Deferred work with context. Each item was explicitly considered and deferred, no
 
 ## P2 — Product path (blocked on v2 evidence)
 - [ ] **Approach C: local-first sync + phone capture app** — Supabase or Cloudflare Worker + KV, single secret token, offline-first background sync, installable phone web app (Android share-target, iOS Shortcut). Why deferred: breaking no-server is a one-way door; waits until v2's Done-per-week thresholds are met and the second user has been observed. Depends on: v2 shipped, 4 weeks of stats. Effort: XL human / L with CC.
-- [ ] **Tags v3 (intent-shaped, filter chips, never folders)** — only if #hashtag conventions appear organically in why-notes during the v1/v2 test. Why deferred: zero-code test running now. Depends on: a month of note data.
+- [x] **Tags** — SHIPPED v2.1.0 (2026-07-16). Evidence gate overridden by founder: every early tester asked. Chips + filter, never folders, as designed.
 - [ ] **Pocket/Instapaper export import via the inbox parser** — the parseInbox architecture generalizes to import files; post-Pocket-shutdown acquisition wedge if the product path opens. Why deferred: not in v2 blast radius. Effort: M human / S with CC.
 
 ## P3 — Hygiene

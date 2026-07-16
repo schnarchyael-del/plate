@@ -223,6 +223,37 @@ describe('applyArchive / applyUnarchive', () => {
   });
 });
 
+/* ---------------- tags ---------------- */
+describe('tags', () => {
+  test('normalizeTag: trims, strips #, collapses whitespace, lowercases, caps at 32', () => {
+    assert.equal(L.normalizeTag('  #Send  Dana  '), 'send dana');
+    assert.equal(L.normalizeTag('##WORK'), 'work');
+    assert.equal(L.normalizeTag('   '), '');
+    assert.equal(L.normalizeTag('#'), '');
+    assert.equal(L.normalizeTag('x'.repeat(50)).length, 32);
+  });
+  test('addTag is idempotent and normalizes; removeTag no-ops on missing', () => {
+    let c = L.addTag(clip({}), '#Work', T0);
+    assert.deepEqual(c.tags, ['work']);
+    const again = L.addTag(c, 'work ', T0 + 1);
+    assert.equal(again, c); // unchanged reference: duplicate no-ops
+    assert.equal(L.addTag(c, '  ', T0), c); // invalid no-ops
+    c = L.removeTag(c, 'work', T0 + 2);
+    assert.deepEqual(c.tags, []);
+    const same = { ...clip({}) };
+    assert.equal(L.removeTag(same, 'nope', T0), same);
+  });
+  test('allTags derives sorted unique tags across plate and archive; v1 clips (no tags field) are fine', () => {
+    const clips = [
+      L.addTag(clip({}), 'work', T0),
+      L.addTag(L.addTag(clip({ archived: true }), 'send', T0), 'work', T0),
+      clip({}) // v1-shaped, no tags
+    ];
+    assert.deepEqual(L.allTags(clips), ['send', 'work']);
+    assert.equal(L.clipHasTag(clips[2], 'work'), false);
+  });
+});
+
 /* ---------------- stats ---------------- */
 describe('stats', () => {
   test('isoWeekKey uses ISO week-YEAR across the boundary (both directions)', () => {

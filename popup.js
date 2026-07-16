@@ -29,7 +29,9 @@ let clips = [];
 let view = 'serve';        // 'serve' | 'list' | 'inbox'
 let listView = 'plate';    // 'plate' | 'archive' | 'all'
 let query = '';
+let tagFilter = null;      // active tag chip in list mode, or null
 let editingId = null;      // which clip's why-line is open for editing
+let taggingId = null;      // which clip's tag input is open
 let servedId = null;       // clip currently on the serve card
 let undoState = null;      // { label, undoFn, timer }
 let inboxState = { candidates: [], total: 0, capped: false }; // no array expandos
@@ -131,6 +133,8 @@ function captureDrafts() {
   }
   const inboxTa = document.getElementById('inboxText');
   if (inboxTa) drafts.inbox = { value: inboxTa.value, start: inboxTa.selectionStart, end: inboxTa.selectionEnd, focused: document.activeElement === inboxTa };
+  const tagIn = document.getElementById('tagInput');
+  if (tagIn && taggingId) drafts.tag = { id: taggingId, value: tagIn.value };
   return drafts;
 }
 function restoreDrafts(drafts) {
@@ -138,6 +142,10 @@ function restoreDrafts(drafts) {
   if (drafts.note && editingId === drafts.note.id) {
     const ta = mainEl.querySelector('.why-edit');
     if (ta) { ta.value = drafts.note.value; ta.setSelectionRange(drafts.note.start, drafts.note.end); }
+  }
+  if (drafts.tag && taggingId === drafts.tag.id) {
+    const tagIn = document.getElementById('tagInput');
+    if (tagIn) { tagIn.value = drafts.tag.value; tagIn.focus(); }
   }
   if (drafts.inbox && view === 'inbox') {
     const ta = document.getElementById('inboxText');
@@ -262,6 +270,20 @@ async function setWhy(id, value) {
   } catch (e) { saveFailed(e); }
 }
 
+async function addTagTo(id, raw) {
+  if (!L.normalizeTag(raw)) return;
+  try {
+    clips = await store.mutateClip(id, (c) => L.addTag(c, raw, Date.now()));
+  } catch (e) { saveFailed(e); }
+}
+
+async function removeTagFrom(id, tag) {
+  try {
+    clips = await store.mutateClip(id, (c) => L.removeTag(c, tag, Date.now()));
+  } catch (e) { saveFailed(e); }
+  render();
+}
+
 /* ---------- serve actions ---------- */
 async function serveDone(clip) {
   servedId = null; // double-fire guard: second 'd' in the beat no-ops
@@ -380,6 +402,9 @@ function render() {
   backBtn.hidden = view !== 'inbox';
   segments.forEach((b) => b.classList.toggle('is-active', b.dataset.view === listView));
 
+  renderTagBar(listMode);
+  renderTagOptions();
+
   mainEl.innerHTML = '';
 
   if (view === 'serve') renderServe(now, counts);
@@ -388,6 +413,88 @@ function render() {
 
   renderUndoBar(); // survives re-renders during its 3s window
   renderFooter(now);
+}
+
+/* ---- tags ---- */
+function renderTagBar(listMode) {
+  const bar = document.getElementById('tagBar');
+  const tags = L.allTags(clips);
+  if (tagFilter && !tags.includes(tagFilter)) tagFilter = null; // tag vanished
+  bar.hidden = !listMode || tags.length === 0;
+  bar.innerHTML = '';
+  if (bar.hidden) return;
+  tags.forEach((t) => {
+    const chip = document.createElement('button');
+    chip.className = 'tag-chip' + (tagFilter === t ? ' active' : '');
+    chip.textContent = `#${t}`;
+    chip.setAttribute('aria-pressed', tagFilter === t ? 'true' : 'false');
+    chip.addEventListener('click', () => {
+      tagFilter = tagFilter === t ? null : t; // toggle; second click clears
+      render();
+    });
+    bar.appendChild(chip);
+  });
+}
+
+// Native typeahead for "use existing tag": one shared datalist.
+function renderTagOptions() {
+  const dl = document.getElementById('tagOptions');
+  dl.innerHTML = '';
+  L.allTags(clips).forEach((t) => {
+    const opt = document.createElement('option');
+    opt.value = t;
+    dl.appendChild(opt);
+  });
+}
+
+function tagRow(c) {
+  const row = document.createElement('div');
+  row.className = 'card-tags';
+  L.clipTags(c).forEach((t) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip small';
+    chip.textContent = `#${t}`;
+    const x = document.createElement('button');
+    x.className = 'tag-x';
+    x.textContent = '×';
+    x.title = `Remove #${t}`;
+    x.setAttribute('aria-label', `Remove tag ${t}`);
+    x.addEventListener('click', () => removeTagFrom(c.id, t));
+    chip.appendChild(x);
+    row.appendChild(chip);
+  });
+
+  if (taggingId === c.id) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'tag-input';
+    input.id = 'tagInput';
+    input.placeholder = 'tag…';
+    input.maxLength = 32;
+    input.setAttribute('list', 'tagOptions');
+    setTimeout(() => input.focus(), 0);
+    const commit = async () => {
+      const v = input.value;
+      taggingId = null;
+      await addTagTo(c.id, v);
+      render();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation(); // never trigger d/n/o or view-level Esc handling
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { taggingId = null; render(); }
+    });
+    input.addEventListener('blur', commit);
+    row.appendChild(input);
+  } else {
+    const add = document.createElement('button');
+    add.className = 'tag-add';
+    add.textContent = L.clipTags(c).length ? '+' : '+ tag';
+    add.title = 'Add a tag';
+    add.addEventListener('click', () => { taggingId = c.id; render(); });
+    row.appendChild(add);
+  }
+  return row;
 }
 
 /* ---- serve view ---- */
@@ -415,6 +522,7 @@ function renderServe(now, counts) {
   card.appendChild(quote);
 
   card.appendChild(whyBlock(clip));
+  card.appendChild(tagRow(clip));
 
   const meta = document.createElement('div');
   meta.className = 'meta';
@@ -450,6 +558,7 @@ function visibleClips() {
   let items = clips;
   if (listView === 'plate') items = items.filter((c) => !c.archived);
   else if (listView === 'archive') items = items.filter((c) => c.archived);
+  if (tagFilter) items = items.filter((c) => L.clipHasTag(c, tagFilter));
 
   if (query) {
     const q = query.toLowerCase();
@@ -457,7 +566,8 @@ function visibleClips() {
       (c.text  || '').toLowerCase().includes(q) ||
       (c.why   || '').toLowerCase().includes(q) ||
       (c.title || '').toLowerCase().includes(q) ||
-      (c.url   || '').toLowerCase().includes(q)
+      (c.url   || '').toLowerCase().includes(q) ||
+      L.clipTags(c).some((t) => t.includes(q))
     );
   }
   return items;
@@ -537,6 +647,7 @@ function card(c, now) {
   el.appendChild(meta);
 
   el.appendChild(whyBlock(c));
+  el.appendChild(tagRow(c));
 
   const actions = document.createElement('div');
   actions.className = 'actions';

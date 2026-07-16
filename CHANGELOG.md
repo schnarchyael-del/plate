@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.0.0 — 2026-07-16
+
+### Added
+- **Tags**: add a tag to any clip from its card or the serve card — type a new one or pick an existing one (typeahead). Tags render as chips; remove with a tap. A filter bar appears in list view once any tag exists — click a chip to filter, click again to clear. Search matches tags too. Tags are labels, never folders: the plate stays one plate.
+- Built because every early tester asked for it. Tags normalize to lowercase, `#` optional when typing.
+
 ## v2.0.0.0 — 2026-07-14
 
 The plate serves you. v2 turns Plate from a capture tool into a return ritual.

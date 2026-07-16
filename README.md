@@ -23,7 +23,7 @@ Save a sentence or paragraph, keep the link, jot why you saved it. The plate ser
 - Everything is stored locally in your browser (`chrome.storage.local`). No account, no server, no API. Works offline.
 - To edit a note, click the note line on any card. Cmd/Ctrl+Enter or clicking away saves; Esc cancels.
 - Also works in any Chromium browser (Edge, Brave, Arc) via the same load-unpacked steps.
-- Tip: write `#work` or `#send Dana` in a note — search for `#send` and that's your tag filter.
+- **Tags** (v2.1): hit `+ tag` on any card to label it — new tag or pick an existing one. Chips under the search bar filter by tag; search matches tags too. Tags are labels, not folders: your plate stays one plate.
 
 ## Data (v2 schema)
 - `clips`: array of `{ id, text, url, title, why, archived, createdAt, updatedAt, archivedAt?, snoozedUntil? }`. v1 clips (without the newer fields) keep working untouched.

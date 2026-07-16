@@ -238,6 +238,47 @@
     return !!oldest && now - (oldest.createdAt || now) > STALE_DAYS * DAY_MS;
   }
 
+  /* ---------- tags (v2.1) ---------- */
+
+  // Tags are plain lowercase labels: trimmed, leading #s stripped, inner
+  // whitespace collapsed, capped at 32 chars. '' means "not a tag".
+  function normalizeTag(raw) {
+    return String(raw || '')
+      .trim()
+      .replace(/^#+/, '')
+      .replace(/\s+/g, ' ')
+      .toLowerCase()
+      .slice(0, 32)
+      .trim();
+  }
+
+  function clipTags(clip) {
+    return Array.isArray(clip.tags) ? clip.tags : [];
+  }
+
+  function clipHasTag(clip, tag) {
+    return clipTags(clip).includes(tag);
+  }
+
+  // Add is idempotent; invalid/duplicate tags return the clip unchanged.
+  function addTag(clip, raw, now) {
+    const tag = normalizeTag(raw);
+    if (!tag || clipHasTag(clip, tag)) return clip;
+    return { ...clip, tags: [...clipTags(clip), tag], updatedAt: now };
+  }
+
+  function removeTag(clip, tag, now) {
+    if (!clipHasTag(clip, tag)) return clip;
+    return { ...clip, tags: clipTags(clip).filter((t) => t !== tag), updatedAt: now };
+  }
+
+  // All tags in use, alphabetical — derived, never a separate registry.
+  function allTags(clips) {
+    const set = new Set();
+    for (const c of clips) for (const t of clipTags(c)) set.add(t);
+    return [...set].sort();
+  }
+
   /* ---------- stats ---------- */
 
   // ISO week key with ISO week-YEAR (Jan 1 can belong to week 52/53 of the
@@ -338,6 +379,7 @@
     escapeHtml, cleanLine, parseInbox, normalizeUrl, buildDedupeIndex, dedupeCandidates,
     makeClip, isSnoozed, pickServeClip, plateCounts, startOfNextLocalDay,
     applyArchive, applyUnarchive, applySnooze, isPlateStale,
+    normalizeTag, clipTags, clipHasTag, addTag, removeTag, allTags,
     isoWeekKey, defaultStats, normalizeStats, recordDone, recordUndoDone,
     noteFillRate, relTime, ageLabel, safeHref
   };
