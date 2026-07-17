@@ -1,12 +1,12 @@
 # Chrome Web Store listing kit — Plate 2.0.0
 
 Everything the developer console asks for, ready to paste.
-Upload file: `dist/plate-2.0.0.zip`
+Upload file: `dist/plate-2.1.1.zip`
 
 ## Your steps (the parts only you can do)
 1. Go to https://chrome.google.com/webstore/devconsole and sign in with the Google account you want to own Plate.
 2. Pay the one-time $5 developer registration fee.
-3. "New item" → upload `dist/plate-2.0.0.zip`.
+3. "New item" → upload `dist/plate-2.1.1.zip`.
 4. Paste the fields below into the listing tabs.
 5. Add at least one screenshot, 1280×800 or 640×400 (ask me — I can generate these).
 6. Pick visibility (see bottom), submit for review. Simple extensions usually clear in hours to a few days.
@@ -25,14 +25,14 @@ Highlight a sentence on any page, right-click, Save selection to Plate. Each cli
 
 The part that makes Plate different: the plate serves you. Open the popup and you get ONE clip — the oldest on your plate — with three choices: Done, Open page, or Not today (it rests until tomorrow). Done archives the clip: off your plate, never deleted, always searchable. The toolbar badge shows what's on your plate and quietly turns amber when the oldest clip has waited more than two weeks.
 
-Texting yourself links and lines from your phone? Paste the pile into Plate's Inbox and each line becomes a clip in one tap. Duplicates are detected automatically, and Plate recovers source links from your pastes — including Android Chrome "share selection" highlight links.
+Texting yourself links and lines from your phone? Hit Paste, drop the pile in, and each line becomes a clip in one tap. Duplicates are detected automatically, and Plate recovers source links from your pastes — including Android Chrome "share selection" highlight links.
 
 Everything is stored locally in your browser. No account, no server, no tracking, no AI, works offline. Your reading list is nobody's business.
 
 - One-gesture capture from the right-click menu
 - Served one clip at a time, with keyboard shortcuts (d / o / n) and undo
 - Done archives, never deletes — search everything, forever
-- Phone inbox with automatic link recovery and dedupe
+- Paste from your phone: automatic link recovery and dedupe
 - Local-only stats (dones this week, notes filled) — nothing leaves your machine
 
 **Category:** Productivity → Tools

@@ -1,5 +1,10 @@
 # Changelog
 
+## v2.1.1.0 — 2026-07-17
+
+### Changed
+- The "Inbox" button is now **"Paste"** — it names what you actually do there. (Every tester read "Inbox" as a place messages arrive; it's a door, not a mailbox.)
+
 ## v2.1.0.0 — 2026-07-16
 
 ### Added
