@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<!-- CWS promo tiles. ?tile=small (440x280) | ?tile=marquee (1400x560).
+     Screenshot at exact viewport, then convert to JPEG (no alpha). -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<style>
+  :root {
+    --paper: #F7F6F2; --paper-2: #FFFFFF; --ink: #23201C; --ink-soft: #6B665C;
+    --line: #E7E4DB; --green: #3D5A40; --green-soft: #EAEFE8;
+  }
+  * { margin: 0; box-sizing: border-box; }
+  body { font-family: Georgia, "Times New Roman", serif; overflow: hidden; }
+
+  .plate-mark { border-radius: 50%; background: var(--paper-2); position: relative; }
+  .plate-mark::after {
+    content: ""; position: absolute; border-radius: 50%;
+    border-style: solid; border-color: var(--line); inset: 22%;
+    border-width: 2px;
+  }
+
+  /* small: olive ground, like the icon */
+  .small {
+    width: 440px; height: 280px; background: var(--green);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  }
+  .small .plate-mark { width: 96px; height: 96px; }
+  .small .wordmark { color: var(--paper); font-size: 44px; font-weight: 700; letter-spacing: .5px; }
+
+  /* marquee: paper ground, wordmark + tagline + plate */
+  .marquee {
+    width: 1400px; height: 560px; background: var(--paper);
+    display: flex; align-items: center; justify-content: center; gap: 110px;
+  }
+  .marquee .text { max-width: 640px; }
+  .marquee .wordmark { color: var(--ink); font-size: 96px; font-weight: 700; letter-spacing: .5px; }
+  .marquee .tag { color: var(--ink-soft); font-size: 30px; line-height: 1.45; margin-top: 18px; }
+  .marquee .tag b { color: var(--green); font-weight: 700; }
+  .marquee .plate-mark { width: 240px; height: 240px; border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<script>
+  const tile = new URLSearchParams(location.search).get('tile') || 'small';
+  if (tile === 'small') {
+    document.body.innerHTML = '<div class="small"><div class="plate-mark"></div><div class="wordmark">Plate</div></div>';
+  } else {
+    document.body.innerHTML = '<div class="marquee"><div class="text"><div class="wordmark">Plate</div><div class="tag">Save a line, keep the link, jot why.<br>The plate serves you <b>one clip at a time</b>.</div></div><div class="plate-mark"></div></div>';
+  }
+</script>
+</body>
+</html>
