@@ -8,7 +8,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="../../popup.css" />
   <title>Plate QA Harness</title>
-  <style>html, body { margin: 20px auto; }</style>
+  <style>html, body { margin: 48px auto; }</style>
 </head>
 <body>
   <header class="top" id="header">
@@ -70,6 +70,14 @@
         allsnoozed: [
           clip({ id: 's1', text: 'Snoozed one.', createdAt: now - 2 * DAY, snoozedUntil: now + 10 * 60 * 60 * 1000 }),
           clip({ id: 's2', text: 'Snoozed two.', createdAt: now - 4 * DAY, snoozedUntil: now + 10 * 60 * 60 * 1000 })
+        ],
+        // Curated fixture for store screenshots — believable content, no real URLs.
+        demo: [
+          clip({ id: 'd1', text: 'The difference between people who finish things and people who don’t is rarely talent. It’s that finishers decide what they’re not going to do.', title: 'The Art of Finishing — maker’s notebook', url: 'https://example.com/finishing', why: 'this is the whole plate idea in one line', tags: ['keep'], createdAt: now - 9 * DAY }),
+          clip({ id: 'd2', text: 'A reading list you never return to isn’t a library. It’s a graveyard with good intentions.', title: 'Why read-later apps fail', url: 'https://example.com/graveyard', why: '#send to Maya', tags: ['send'], createdAt: now - 6 * DAY }),
+          clip({ id: 'd3', text: 'Small tools survive because they refuse to become platforms.', title: 'Notes on calm software', url: 'https://example.com/calm', why: '', tags: ['work'], createdAt: now - 2 * DAY }),
+          clip({ id: 'd4', text: 'Write it down where you’ll trip over it.', title: 'On remembering', url: 'https://example.com/remembering', why: 'motto', tags: [], createdAt: now - 6 * 60 * 60 * 1000 }),
+          clip({ id: 'd5', text: 'Every system that survives does less than its designer hoped and more than its critics feared.', title: 'Systems that last', url: 'https://example.com/systems', why: 'quote for the talk', archived: true, tags: ['work'], createdAt: now - 20 * DAY, archivedAt: now - 12 * DAY })
         ]
       };
 
